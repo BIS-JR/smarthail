@@ -240,6 +240,18 @@ A cada login e a cada 15 minutos (ou no botão ↻), `sync.js`:
 
 ## 🚀 Deploy
 
+### Render (principal)
+
+O arquivo `render.yaml` descreve o app como **Static Site** (gratuito, servido por CDN, sem cold start):
+
+1. No [dashboard do Render](https://dashboard.render.com): **New → Blueprint**.
+2. Selecione o repositório `smarthail` e confirme em **Apply**.
+3. O site fica em `https://smarthail.onrender.com` (ou com sufixo, se o nome já existir) e é atualizado a cada push na `main`.
+
+O `render.yaml` já configura o *rewrite* de rotas da SPA (`/* → /index.html`), cache longo para `/assets/*` e cabeçalhos de segurança.
+
+### GitHub Pages (alternativo)
+
 O workflow `.github/workflows/deploy.yml` publica no **GitHub Pages** a cada push na `main`:
 
 1. No GitHub: **Settings → Pages → Source: GitHub Actions**.
