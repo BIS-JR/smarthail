@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { api } from '@/api/client';
+import { useAuth } from '@/lib/AuthContext';
 
 const ClimateContext = createContext(null);
 
@@ -9,6 +10,10 @@ const ClimateContext = createContext(null);
  * `version`, que as páginas usam como dependência para recarregar os dados.
  */
 export function ClimateProvider({ children }) {
+  const { user } = useAuth();
+  // Define o dono dos metadados de sincronização antes de lê-los (idempotente)
+  api.climate.setUser(user?.id ?? null);
+
   const [syncing, setSyncing] = useState(false);
   const [meta, setMeta] = useState(() => api.climate.meta());
   const [error, setError] = useState(null);

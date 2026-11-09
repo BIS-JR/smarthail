@@ -6,6 +6,7 @@ import { getModule } from '@/lib/modules';
 import { severityConfig, alertTypeLabels } from '@/lib/labels';
 import { LoadingBlock } from '@/components/ui/spinner';
 import PageHeader from '@/components/smarthail/PageHeader';
+import PushBanner from '@/components/smarthail/PushBanner';
 
 const module = getModule('alerts');
 const LIMITS = [10, 20, 50];
@@ -33,6 +34,8 @@ export default function AlertsList() {
         subtitle={activeCount > 0 ? `${activeCount} alerta(s) ativo(s)` : 'Nenhum alerta ativo'}
         actions={limitSelector}
       />
+
+      <PushBanner />
 
       {loading ? (
         <LoadingBlock spinner={module.spinner} />

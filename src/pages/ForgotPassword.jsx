@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { MailCheck } from 'lucide-react';
 import { api } from '@/api/client';
-import AuthLayout, { Field, TextInput, PrimaryButton, LocalModeNote } from '@/components/AuthLayout';
+import AuthLayout, { Field, TextInput, PrimaryButton, LocalModeNote, FormError } from '@/components/AuthLayout';
 
 export default function ForgotPassword() {
   const [email, setEmail] = useState('');
@@ -10,13 +10,21 @@ export default function ForgotPassword() {
   const [sent, setSent] = useState(false);
   const [token, setToken] = useState(null);
 
+  const [error, setError] = useState('');
+
   const submit = async (e) => {
     e.preventDefault();
     setLoading(true);
-    const { token: t } = await api.auth.requestPasswordReset(email);
-    setToken(t);
-    setSent(true);
-    setLoading(false);
+    setError('');
+    try {
+      const { token: t } = await api.auth.requestPasswordReset(email);
+      setToken(t);
+      setSent(true);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -42,6 +50,7 @@ export default function ForgotPassword() {
           <Field label="E-mail da conta">
             <TextInput type="email" required autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} />
           </Field>
+          <FormError>{error}</FormError>
           <PrimaryButton type="submit" loading={loading}>Enviar link</PrimaryButton>
         </form>
       )}

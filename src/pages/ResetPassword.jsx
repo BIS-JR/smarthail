@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { api } from '@/api/client';
+import { Spinner } from '@/components/ui/spinner';
 import AuthLayout, { Field, TextInput, PrimaryButton, FormError } from '@/components/AuthLayout';
 
 export default function ResetPassword() {
@@ -12,6 +13,13 @@ export default function ResetPassword() {
   const [confirm, setConfirm] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  // Nuvem: o link do e-mail abre uma sessão de recuperação; local: usa o token da URL
+  const [canReset, setCanReset] = useState(api.mode === 'local' ? Boolean(token) : null);
+
+  useEffect(() => {
+    if (api.mode !== 'cloud') return;
+    api.auth.hasRecoverySession().then(setCanReset);
+  }, []);
 
   const submit = async (e) => {
     e.preventDefault();
@@ -20,8 +28,8 @@ export default function ResetPassword() {
     setLoading(true);
     try {
       await api.auth.resetPassword(token, password);
-      toast.success('Senha redefinida', { description: 'Entre com sua nova senha.' });
-      navigate('/login', { replace: true });
+      toast.success('Senha redefinida');
+      navigate(api.mode === 'cloud' ? '/' : '/login', { replace: true });
     } catch (err) {
       setError(err.message);
       setLoading(false);
@@ -34,8 +42,15 @@ export default function ResetPassword() {
       subtitle="Escolha uma senha com letras e números"
       footer={<Link to="/login" className="font-semibold text-blue-400 hover:text-blue-300">Voltar ao login</Link>}
     >
-      {!token ? (
-        <FormError>Link inválido. Solicite uma nova redefinição de senha.</FormError>
+      {canReset === null ? (
+        <div className="flex justify-center py-6"><Spinner /></div>
+      ) : !canReset ? (
+        <div className="space-y-4">
+          <FormError>Link inválido ou expirado. Solicite uma nova redefinição de senha.</FormError>
+          <Link to="/forgot-password" className="block text-center text-sm font-semibold text-blue-400 hover:text-blue-300">
+            Pedir novo link
+          </Link>
+        </div>
       ) : (
         <form onSubmit={submit} className="space-y-4">
           <Field label="Nova senha">

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Menu, Info, LogOut, HelpCircle, ShieldCheck, FlaskConical, Eraser, RefreshCw } from 'lucide-react';
+import { Menu, Info, LogOut, HelpCircle, ShieldCheck, FlaskConical, Eraser, RefreshCw, Bell, BellOff } from 'lucide-react';
+import { usePush } from '@/hooks/usePush';
 import { toast } from 'sonner';
 import { api } from '@/api/client';
 import { useAuth } from '@/lib/AuthContext';
@@ -20,20 +21,20 @@ const menuSections = {
             <p className="text-xs text-blue-400">Proteção Climática Automotiva</p>
           </div>
         </div>
-        <p><span className="font-semibold text-white">Versão:</span> 1.0.0</p>
+        <p><span className="font-semibold text-white">Versão:</span> 1.1.0</p>
         <p><span className="font-semibold text-white">Última atualização:</span> 09/11/2026</p>
         <div className="border-t border-slate-700 pt-3">
-          <p className="mb-2 font-semibold text-white">Novidades da v1.0.0:</p>
+          <p className="mb-2 font-semibold text-white">Novidades da v1.1.0:</p>
           <ul className="list-inside list-disc space-y-1 text-slate-400">
-            <li>Dados meteorológicos reais via Open-Meteo</li>
-            <li>Previsões de risco calculadas para as próximas 72h</li>
-            <li>Alertas gerados automaticamente a partir da previsão</li>
-            <li>Mapas de risco com histórico de 60h</li>
-            <li>Relatórios de sinistro com dupla checagem</li>
+            <li>Contas na nuvem: seus dados em qualquer aparelho</li>
+            <li>Notificações de alerta com o app fechado</li>
+            <li>Indicador de granizo por instabilidade atmosférica</li>
+            <li>Radar de chuva em tempo real no mapa</li>
+            <li>Novo mapa base (OpenFreeMap)</li>
           </ul>
         </div>
         <p className="border-t border-slate-700 pt-3 text-xs text-slate-500">
-          Dados meteorológicos: Open-Meteo.com (CC BY 4.0). Mapas: © colaboradores do OpenStreetMap.
+          Dados meteorológicos: Open-Meteo.com (CC BY 4.0). Radar: RainViewer. Mapas: OpenFreeMap, © OpenMapTiles, © colaboradores do OpenStreetMap.
         </p>
       </div>
     ),
@@ -121,19 +122,30 @@ export default function HamburgerMenu() {
     setDialog(key);
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     setOpen(false);
-    logout();
+    await logout();
     navigate('/login', { replace: true });
   };
 
   const handleDemo = async (add) => {
     setOpen(false);
-    if (add) await api.climate.addDemoData();
-    else await api.climate.clearDemoData();
-    bump();
-    toast.success(add ? 'Dados de demonstração adicionados' : 'Dados de demonstração removidos');
+    try {
+      if (add) await api.climate.addDemoData();
+      else await api.climate.clearDemoData();
+      bump();
+      toast.success(add ? 'Dados de demonstração adicionados' : 'Dados de demonstração removidos');
+    } catch (e) {
+      toast.error('Falha ao alterar dados de demonstração', { description: e.message });
+    }
   };
+
+  const push = usePush();
+  const pushLabel = {
+    enabled: 'Desativar notificações',
+    disabled: 'Ativar notificações',
+    denied: 'Notificações bloqueadas',
+  }[push.status];
 
   return (
     <>
@@ -161,6 +173,18 @@ export default function HamburgerMenu() {
                 label={syncing ? 'Atualizando…' : 'Atualizar clima agora'}
                 onClick={() => { setOpen(false); refresh(true); }}
               />
+              {pushLabel && (
+                <MenuItem
+                  icon={push.status === 'enabled' ? BellOff : Bell}
+                  label={push.busy ? 'Aguarde…' : pushLabel}
+                  onClick={() => {
+                    setOpen(false);
+                    if (push.status === 'enabled') push.disable();
+                    else if (push.status === 'disabled') push.enable();
+                    else toast.info('Notificações bloqueadas', { description: 'Libere-as nas configurações do site no navegador.' });
+                  }}
+                />
+              )}
               <MenuItem icon={FlaskConical} label="Adicionar demonstração" onClick={() => handleDemo(true)} />
               <MenuItem icon={Eraser} label="Remover demonstração" onClick={() => handleDemo(false)} />
             </div>

@@ -1,11 +1,12 @@
 import { useState } from 'react';
 import { Link, Navigate, useNavigate } from 'react-router-dom';
+import { toast } from 'sonner';
 import { api } from '@/api/client';
 import { useAuth } from '@/lib/AuthContext';
 import AuthLayout, { Field, TextInput, PrimaryButton, FormError, LocalModeNote } from '@/components/AuthLayout';
 
 export default function Register() {
-  const { confirmSignup, isAuthenticated } = useAuth();
+  const { confirmSignup, isAuthenticated, refresh } = useAuth();
   const navigate = useNavigate();
   const [step, setStep] = useState(1);
   const [form, setForm] = useState({ fullName: '', email: '', password: '', confirm: '' });
@@ -24,8 +25,14 @@ export default function Register() {
     if (form.password !== form.confirm) return setError('As senhas não coincidem.');
     setLoading(true);
     try {
-      const { code: c } = await api.auth.startSignup(form);
-      setSentCode(c);
+      const res = await api.auth.startSignup(form);
+      if (!res.needsCode) {
+        // Confirmação por e-mail desativada: a conta já está ativa e logada
+        await refresh();
+        navigate('/', { replace: true });
+        return;
+      }
+      setSentCode(res.code ?? '');
       setStep(2);
     } catch (err) {
       setError(err.message);
@@ -72,9 +79,15 @@ export default function Register() {
         </form>
       ) : (
         <form onSubmit={submitCode} className="space-y-4">
-          <LocalModeNote>
-            Seu código de verificação é <span className="font-mono text-base font-bold tracking-widest">{sentCode}</span>
-          </LocalModeNote>
+          {sentCode ? (
+            <LocalModeNote>
+              Seu código de verificação é <span className="font-mono text-base font-bold tracking-widest">{sentCode}</span>
+            </LocalModeNote>
+          ) : (
+            <p className="rounded-lg border border-blue-500/20 bg-blue-500/10 px-3 py-2 text-xs text-blue-200">
+              Enviamos um código de 6 dígitos para <span className="font-semibold">{form.email}</span>. Confira também a caixa de spam.
+            </p>
+          )}
           <Field label="Código de 6 dígitos">
             <TextInput
               inputMode="numeric"
@@ -87,9 +100,27 @@ export default function Register() {
           </Field>
           <FormError>{error}</FormError>
           <PrimaryButton type="submit" loading={loading}>Confirmar e entrar</PrimaryButton>
-          <button type="button" onClick={() => { setStep(1); setCode(''); setError(''); }} className="w-full text-xs text-slate-400 hover:text-white">
-            Voltar e corrigir dados
-          </button>
+          <div className="flex justify-between gap-2">
+            <button type="button" onClick={() => { setStep(1); setCode(''); setError(''); }} className="text-xs text-slate-400 hover:text-white">
+              Voltar e corrigir dados
+            </button>
+            {!sentCode && (
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    await api.auth.resendSignupCode(form.email);
+                    toast.success('Código reenviado');
+                  } catch (err) {
+                    setError(err.message);
+                  }
+                }}
+                className="text-xs text-blue-400 hover:text-blue-300"
+              >
+                Reenviar código
+              </button>
+            )}
+          </div>
         </form>
       )}
     </AuthLayout>

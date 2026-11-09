@@ -1,8 +1,8 @@
 /**
- * Sincronização climática: localização → Open-Meteo → entidades locais.
+ * Sincronização climática: localização → Open-Meteo → entidades.
  * Chamada ao abrir o app (com intervalo mínimo) e pelo botão "Atualizar".
  */
-import { entities, currentUserId, readJSON, writeJSON, PREFIX } from './store';
+import { entities, readJSON, writeJSON, PREFIX } from './store';
 import {
   DEFAULT_LOCATION,
   getDeviceLocation,
@@ -14,13 +14,20 @@ import {
   riskFromCondition,
   readingAt,
 } from './weather';
+import { updatePushLocation } from './push';
 
 const MIN_INTERVAL_MS = 15 * 60 * 1000;
 const HOUR = 3600;
-const metaKey = () => `${PREFIX}:${currentUserId()}:sync`;
+
+// Usuário ativo (definido pelo ClimateProvider) — os metadados ficam por usuário neste aparelho
+let activeUserId = null;
+export function setSyncUser(userId) {
+  activeUserId = userId;
+}
+const metaKey = () => `${PREFIX}:${activeUserId}:sync`;
 
 export function getSyncMeta() {
-  return readJSON(metaKey(), null);
+  return activeUserId ? readJSON(metaKey(), null) : null;
 }
 
 let inFlight = null;
@@ -46,48 +53,55 @@ async function runSync() {
 
   // Leituras: substitui as leituras reais anteriores (mantém dados de demonstração)
   const readings = buildWeatherReadings(data, location);
-  entities.WeatherData.removeWhere((r) => !r.demo);
+  await entities.WeatherData.deleteWhere({ eq: { demo: false } });
   await entities.WeatherData.bulkCreate(readings);
 
   // Previsões: sempre recalculadas
   const forecasts = buildRiskForecasts(data, location);
-  entities.RiskForecast.removeWhere((r) => !r.demo);
+  await entities.RiskForecast.deleteWhere({ eq: { demo: false } });
   await entities.RiskForecast.bulkCreate(forecasts);
 
-  // Alertas: upsert por chave, preservando histórico (30 dias)
+  // Alertas: atualização por chave, preservando histórico (30 dias)
   await upsertAlerts(buildAlerts(data, forecasts, location));
 
-  // Trajeto GPS e capa
+  // Trajeto GPS, capa e posição usada pelo servidor de notificações
   await updateTracking(data, location, forecasts);
   await ensureCoverStatus();
+  await updatePushLocation(location).catch(() => {});
 
-  const meta = {
-    at: new Date().toISOString(),
-    location,
-    usedDeviceLocation: Boolean(device),
-  };
-  writeJSON(metaKey(), meta);
+  const meta = { at: new Date().toISOString(), location, usedDeviceLocation: Boolean(device) };
+  if (activeUserId) writeJSON(metaKey(), meta);
   return meta;
 }
 
 async function upsertAlerts(fresh) {
   const now = Date.now();
-  const existing = entities.ClimateAlert.snapshot();
+  const existing = await entities.ClimateAlert.list(null);
   const byKey = new Map(existing.filter((a) => a.key).map((a) => [a.key, a]));
 
   for (const alert of fresh) {
     const prev = byKey.get(alert.key);
-    if (prev) await entities.ClimateAlert.update(prev.id, { ...alert, timestamp: prev.timestamp });
-    else await entities.ClimateAlert.create(alert);
+    if (prev) {
+      // eslint-disable-next-line no-unused-vars
+      const { timestamp, ...rest } = alert; // mantém a data de emissão original
+      await entities.ClimateAlert.update(prev.id, rest);
+    } else {
+      try {
+        await entities.ClimateAlert.create(alert);
+      } catch {
+        /* o servidor de alertas pode ter criado a mesma chave ao mesmo tempo */
+      }
+    }
   }
 
   // Desativa alertas cuja janela terminou e remove os muito antigos
-  for (const a of entities.ClimateAlert.snapshot()) {
+  for (const a of existing) {
     if (a.is_active && a.expected_end && new Date(a.expected_end).getTime() < now) {
       await entities.ClimateAlert.update(a.id, { is_active: false });
     }
   }
-  entities.ClimateAlert.removeWhere((a) => now - new Date(a.timestamp).getTime() > 30 * 24 * HOUR * 1000);
+  const cutoff = new Date(now - 30 * 24 * HOUR * 1000).toISOString();
+  await entities.ClimateAlert.deleteWhere({ lt: { timestamp: cutoff } });
 }
 
 function distanceMeters(a, b) {
@@ -104,17 +118,17 @@ const FORECAST_TO_POINT = { low: 'safe', moderate: 'moderate', high: 'high', ext
 
 async function updateTracking(data, location, forecasts) {
   const now = Date.now();
-  const points = entities.GpsTracking.snapshot();
+  const [anyPoint] = await entities.GpsTracking.list('-timestamp', 1);
 
   // Primeiro acesso: cria um trajeto de demonstração nas últimas 60h ao redor da localização,
   // com o risco calculado a partir do clima real de cada horário.
-  if (points.length === 0) {
+  if (!anyPoint) {
     const offsets = [
       [0.021, -0.018], [0.016, -0.011], [0.010, -0.004], [0.004, 0.003],
       [-0.003, 0.009], [-0.008, 0.004], [-0.004, -0.003],
     ];
     const route = offsets.map(([dLat, dLng], i) => {
-      const t = now / 1000 - (60 - i * 8) * HOUR;
+      const t = now / 1000 - (59 - i * 8) * HOUR;
       const r = readingAt(data, t);
       return {
         timestamp: new Date(t * 1000).toISOString(),
@@ -129,32 +143,34 @@ async function updateTracking(data, location, forecasts) {
   }
 
   // Ponto atual: novo registro se passou 30 min ou o veículo se moveu > 200 m
-  const latest = [...entities.GpsTracking.snapshot()].sort((a, b) => (a.timestamp < b.timestamp ? 1 : -1))[0];
+  const [latest] = await entities.GpsTracking.list('-timestamp', 1);
   const moved = !latest || distanceMeters({ lat: latest.latitude, lng: latest.longitude }, location) > 200;
   const stale = !latest || now - new Date(latest.timestamp).getTime() > 30 * 60 * 1000;
-  if (!moved && !stale) return;
+  if (moved || stale) {
+    const current = readingAt(data, now / 1000);
+    const nearTerm = forecasts
+      .filter((f) => new Date(f.expected_start).getTime() < now + 6 * HOUR * 1000)
+      .map((f) => FORECAST_TO_POINT[f.risk_level]);
+    const risk = [riskFromCondition(current.condition, current.gust), ...nearTerm]
+      .reduce((max, r) => (RISK_ORDER.indexOf(r) > RISK_ORDER.indexOf(max) ? r : max), 'safe');
 
-  const current = readingAt(data, now / 1000);
-  const nearTerm = forecasts
-    .filter((f) => new Date(f.expected_start).getTime() < now + 6 * HOUR * 1000)
-    .map((f) => FORECAST_TO_POINT[f.risk_level]);
-  const risk = [riskFromCondition(current.condition, current.gust), ...nearTerm]
-    .reduce((max, r) => (RISK_ORDER.indexOf(r) > RISK_ORDER.indexOf(max) ? r : max), 'safe');
-
-  await entities.GpsTracking.create({
-    timestamp: new Date(now).toISOString(),
-    latitude: location.lat,
-    longitude: location.lng,
-    location_name: location.name,
-    risk_level: risk,
-  });
+    await entities.GpsTracking.create({
+      timestamp: new Date(now).toISOString(),
+      latitude: location.lat,
+      longitude: location.lng,
+      location_name: location.name,
+      risk_level: risk,
+    });
+  }
 
   // Mantém no máximo 60h de pontos
-  entities.GpsTracking.removeWhere((p) => now - new Date(p.timestamp).getTime() > 60 * HOUR * 1000);
+  const cutoff = new Date(now - 60 * HOUR * 1000).toISOString();
+  await entities.GpsTracking.deleteWhere({ lt: { timestamp: cutoff } });
 }
 
 async function ensureCoverStatus() {
-  if (entities.CoverStatus.snapshot().length > 0) return;
+  const [status] = await entities.CoverStatus.list('-timestamp', 1);
+  if (status) return;
   await entities.CoverStatus.create({
     timestamp: new Date().toISOString(),
     is_inflated: false,
@@ -171,20 +187,20 @@ async function ensureCoverStatus() {
 // ---------------------------------------------------------------------------
 
 export async function addDemoData() {
-  const meta = getSyncMeta();
-  const loc = meta?.location ?? DEFAULT_LOCATION;
+  const loc = getSyncMeta()?.location ?? DEFAULT_LOCATION;
   const now = Date.now();
   const iso = (offsetHours) => new Date(now + offsetHours * HOUR * 1000).toISOString();
   const base = { location_name: loc.name, location_lat: loc.lat, location_lng: loc.lng, demo: true };
+  const stamp = now.toString(36);
 
   await entities.ClimateAlert.bulkCreate([
-    { ...base, type: 'hail', severity: 'critical', is_active: true, timestamp: iso(-0.5), expected_end: iso(4),
+    { ...base, key: `demo:hail:${stamp}`, type: 'hail', severity: 'critical', is_active: true, timestamp: iso(-0.5), expected_end: iso(4),
       title: '[Simulação] Granizo severo se aproximando',
       description: 'Célula de tempestade com granizo de até 3 cm a 25 km, deslocando-se em sua direção. Infle a capa agora.' },
-    { ...base, type: 'storm', severity: 'high', is_active: false, timestamp: iso(-30),
+    { ...base, key: `demo:storm:${stamp}`, type: 'storm', severity: 'high', is_active: false, timestamp: iso(-30),
       title: '[Simulação] Tempestade com raios',
       description: 'Rajadas de 75 km/h e descargas elétricas registradas na região.' },
-    { ...base, type: 'flood', severity: 'medium', is_active: false, timestamp: iso(-80),
+    { ...base, key: `demo:flood:${stamp}`, type: 'flood', severity: 'medium', is_active: false, timestamp: iso(-80),
       title: '[Simulação] Pontos de alagamento',
       description: 'Acumulado de 48 mm em 3 horas. Evite estacionamentos em áreas baixas.' },
   ]);
@@ -206,5 +222,7 @@ export async function addDemoData() {
 }
 
 export async function clearDemoData() {
-  for (const e of Object.values(entities)) e.removeWhere((r) => r.demo && e.name !== 'GpsTracking');
+  for (const name of ['ClimateAlert', 'RiskForecast', 'InsuranceClaim', 'WeatherData']) {
+    await entities[name].deleteWhere({ eq: { demo: true } });
+  }
 }

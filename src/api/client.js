@@ -6,10 +6,14 @@
  */
 import { entities } from './store';
 import { auth } from './auth';
-import { syncClimate, getSyncMeta, addDemoData, clearDemoData } from './sync';
+import { isCloud } from './supabase';
+import { syncClimate, getSyncMeta, setSyncUser, addDemoData, clearDemoData } from './sync';
+import { enablePush, disablePush, getPushStatus, isPushAvailable, needsInstallForPush } from './push';
 
 export const api = {
+  mode: isCloud ? 'cloud' : 'local',
   entities,
   auth,
-  climate: { sync: syncClimate, meta: getSyncMeta, addDemoData, clearDemoData },
+  climate: { sync: syncClimate, meta: getSyncMeta, setUser: setSyncUser, addDemoData, clearDemoData },
+  push: { enable: enablePush, disable: disablePush, status: getPushStatus, available: isPushAvailable, needsInstall: needsInstallForPush },
 };

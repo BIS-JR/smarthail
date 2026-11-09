@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { Eye, EyeOff } from 'lucide-react';
 import { toast } from 'sonner';
+import { api } from '@/api/client';
 import { useAuth } from '@/lib/AuthContext';
 import AuthLayout, { Field, TextInput, PrimaryButton, FormError } from '@/components/AuthLayout';
 
@@ -80,7 +81,17 @@ export default function Login() {
         </div>
         <button
           type="button"
-          onClick={() => toast.info('Login com Google indisponível', { description: 'Disponível após conectar um provedor de autenticação (ex.: Supabase ou Firebase).' })}
+          onClick={async () => {
+            if (!api.auth.supportsGoogle) {
+              toast.info('Login com Google em breve', { description: 'Por enquanto, entre com e-mail e senha.' });
+              return;
+            }
+            try {
+              await api.auth.signInWithGoogle(); // redireciona para o Google
+            } catch (err) {
+              setError(err.message);
+            }
+          }}
           className="flex w-full items-center justify-center gap-2 rounded-xl border border-white/10 bg-white py-2.5 text-sm font-semibold text-slate-900 transition hover:bg-slate-100"
         >
           <GoogleIcon /> Entrar com Google
