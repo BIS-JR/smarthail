@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import moment from 'moment';
-import { Navigation, MapPin } from 'lucide-react';
+import { Navigation, MapPin, Radar } from 'lucide-react';
 import { useEntityList } from '@/hooks/useEntityList';
 import { getModule } from '@/lib/modules';
 import { gpsRiskColors, gpsRiskLabels } from '@/lib/labels';
@@ -13,16 +13,27 @@ const module = getModule('maps');
 export default function RiskMaps() {
   const { data: points, loading } = useEntityList('GpsTracking', '-timestamp', 100);
   const [selectedId, setSelectedId] = useState(null);
+  const [radar, setRadar] = useState(true);
   const hasDemo = points.some((p) => p.demo);
 
   return (
     <div>
       <PageHeader module={module} subtitle="Trajeto das últimas 60 horas" />
 
-      <div className="h-[50vh] min-h-[280px] overflow-hidden rounded-2xl border border-white/10">
+      <div className="relative h-[50vh] min-h-[280px] overflow-hidden rounded-2xl border border-white/10">
         {loading ? <LoadingBlock className="h-full" spinner={module.spinner} /> : (
-          <RiskMap points={points} selectedId={selectedId} onSelect={setSelectedId} />
+          <RiskMap points={points} selectedId={selectedId} onSelect={setSelectedId} radar={radar} />
         )}
+        <button
+          onClick={() => setRadar((r) => !r)}
+          aria-pressed={radar}
+          className={`absolute right-3 top-3 z-[500] flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold shadow-lg backdrop-blur transition ${
+            radar ? 'border-sky-400/50 bg-sky-500/30 text-sky-100' : 'border-white/15 bg-slate-900/80 text-slate-300'
+          }`}
+        >
+          <Radar className="h-3.5 w-3.5" />
+          Radar de chuva {radar ? 'ligado' : 'desligado'}
+        </button>
       </div>
 
       <div className="mt-3 flex flex-wrap items-center justify-center gap-x-3 gap-y-1">

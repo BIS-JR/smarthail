@@ -1,4 +1,6 @@
+import { Suspense } from 'react';
 import { Navigate, Outlet, useLocation } from 'react-router-dom';
+import { LoadingBlock } from '@/components/ui/spinner';
 import { useAuth } from '@/lib/AuthContext';
 import { ClimateProvider } from '@/lib/ClimateContext';
 import TopBar from '@/components/smarthail/TopBar';
@@ -17,7 +19,9 @@ export default function AppLayout() {
       <div className="min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 text-white">
         <TopBar />
         <main className="mx-auto max-w-3xl px-4 pb-10 pt-5">
-          <Outlet />
+          <Suspense fallback={<LoadingBlock className="py-24" />}>
+            <Outlet />
+          </Suspense>
         </main>
       </div>
     </ClimateProvider>

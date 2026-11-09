@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { lazy, useEffect } from 'react';
 import { BrowserRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { Toaster } from 'sonner';
 import { AuthProvider, useAuth } from '@/lib/AuthContext';
@@ -10,15 +10,17 @@ import Register from '@/pages/Register';
 import ForgotPassword from '@/pages/ForgotPassword';
 import ResetPassword from '@/pages/ResetPassword';
 import Home from '@/pages/Home';
-import FeatureDetail from '@/pages/FeatureDetail';
-import Dashboard from '@/pages/Dashboard';
-import ClimateHistory from '@/pages/ClimateHistory';
-import AlertsList from '@/pages/AlertsList';
-import ForecastDetail from '@/pages/ForecastDetail';
-import RiskMaps from '@/pages/RiskMaps';
-import Insurance from '@/pages/Insurance';
-import CoverAutomation from '@/pages/CoverAutomation';
 import NotFound from '@/pages/NotFound';
+
+// Páginas de módulo carregadas sob demanda (mapa e gráficos são pesados)
+const FeatureDetail = lazy(() => import('@/pages/FeatureDetail'));
+const Dashboard = lazy(() => import('@/pages/Dashboard'));
+const ClimateHistory = lazy(() => import('@/pages/ClimateHistory'));
+const AlertsList = lazy(() => import('@/pages/AlertsList'));
+const ForecastDetail = lazy(() => import('@/pages/ForecastDetail'));
+const RiskMaps = lazy(() => import('@/pages/RiskMaps'));
+const Insurance = lazy(() => import('@/pages/Insurance'));
+const CoverAutomation = lazy(() => import('@/pages/CoverAutomation'));
 
 function ScrollToTop() {
   const { pathname } = useLocation();

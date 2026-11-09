@@ -21,11 +21,6 @@
   scrollbar-width: none;
 }
 
-/* Leaflet — tema escuro aplicado aos tiles do OpenStreetMap */
-.dark-tiles {
-  filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%) saturate(60%);
-}
-
 /* Leaflet — popup escuro */
 .leaflet-popup-content-wrapper {
   background: #1e293b !important;

@@ -10,11 +10,13 @@ export default defineConfig({
     alias: { '@': path.resolve(import.meta.dirname, './src') },
   },
   build: {
+    // O chunk do mapa (MapLibre) é grande, mas só carrega nas telas com mapa.
+    chunkSizeWarningLimit: 1000,
     rollupOptions: {
       output: {
         manualChunks: {
           react: ['react', 'react-dom', 'react-router-dom'],
-          map: ['leaflet', 'react-leaflet'],
+          map: ['leaflet', 'react-leaflet', 'maplibre-gl', '@maplibre/maplibre-gl-leaflet'],
           charts: ['recharts'],
           motion: ['framer-motion'],
         },
