@@ -12,6 +12,7 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import webpush from 'npm:web-push@3.6.7';
 import { fetchOpenMeteo, buildRiskForecasts, buildAlerts } from '../_shared/climate.js';
+import { fetchInmetWarnings, inmetAlertsFor } from '../_shared/inmet.js';
 
 const MIN_INTERVAL_MS = 10 * 60 * 1000; // protege contra chamadas repetidas
 const NOTIFY_SEVERITIES = new Set(['high', 'critical']);
@@ -66,7 +67,17 @@ Deno.serve(async (req) => {
   }
 
   const weatherCache = new Map<string, unknown>(); // usuários próximos compartilham a consulta
-  const stats = { users: 0, alerts: 0, sent: 0, removed: 0, errors: [] as string[] };
+  const stats = { users: 0, alerts: 0, inmet: 0, sent: 0, removed: 0, errors: [] as string[] };
+
+  // Avisos oficiais do INMET: uma consulta por execução, filtrada por polígono para cada usuário
+  let inmetWarnings: Awaited<ReturnType<typeof fetchInmetWarnings>> = [];
+  if (byUser.size) {
+    try {
+      inmetWarnings = await fetchInmetWarnings();
+    } catch (e) {
+      stats.errors.push(`INMET: ${(e as Error).message}`);
+    }
+  }
 
   for (const [userId, userSubs] of byUser) {
     try {
@@ -81,7 +92,9 @@ Deno.serve(async (req) => {
       }
 
       const forecasts = buildRiskForecasts(data, location);
-      const alerts = buildAlerts(data, forecasts, location);
+      const official = inmetAlertsFor(inmetWarnings, location);
+      const alerts = [...official, ...buildAlerts(data, forecasts, location)];
+      stats.inmet += official.length;
       stats.users++;
       stats.alerts += alerts.length;
       if (!alerts.length) continue;

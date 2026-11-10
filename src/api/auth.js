@@ -29,7 +29,7 @@ const ERROR_MESSAGES = [
   [/already registered|already been registered/i, 'Já existe uma conta com este e-mail.'],
   [/token has expired|otp.*expired|invalid.*token|token.*invalid/i, 'Código incorreto ou expirado.'],
   [/rate limit|too many|security purposes/i, 'Muitas tentativas. Aguarde um minuto e tente novamente.'],
-  [/password.*(weak|short|characters)/i, 'Senha fraca: use pelo menos 8 caracteres, com letras e números.'],
+  [/weak_password|password.*(weak|short|character)/i, 'Senha fraca: use pelo menos 8 caracteres, com letras e números.'],
   [/provider is not enabled/i, 'Login com Google ainda não está habilitado.'],
 ];
 

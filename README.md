@@ -50,12 +50,13 @@ O SMARTHAIL monitora as condições meteorológicas em tempo real na localizaç�
 | --- | --- |
 | `@base44/sdk` para entidades e auth | `src/api/` — camada própria com **a mesma interface** (`api.entities.X.list('-timestamp', 10)`) |
 | Dados climáticos inseridos manualmente | **Open-Meteo** (gratuita, sem chave): clima real, histórico e previsão |
-| Alertas e previsões cadastrados à mão | Calculados automaticamente a partir da previsão (`src/api/weather.js`) |
-| Tiles de mapa CARTO (hoje exigem chave) | OpenStreetMap com filtro escuro via CSS |
-| Login Base44 / Google | Autenticação local (cadastro com código, login, redefinição de senha) |
+| Alertas e previsões cadastrados à mão | Calculados a partir da previsão + **avisos oficiais do INMET** |
+| Tiles de mapa CARTO (hoje exigem chave) | **OpenFreeMap** (vetorial, gratuito) + radar **RainViewer** |
+| Backend e login Base44 | **Supabase**: Postgres com RLS, Auth, Edge Functions e pg_cron |
+| Sem notificações | **Web Push** com o app fechado (PWA instalável) |
 | ~50 componentes shadcn/ui | Apenas os necessários (dialog, sheet, spinner) + `sonner` para toasts |
 
-**Persistência:** por enquanto os dados ficam no `localStorage` do navegador, separados por usuário. Para ter contas e dados sincronizados entre dispositivos, troque a implementação de `src/api/store.js` e `src/api/auth.js` por um backend (ex.: Supabase). As páginas não precisam mudar.
+**Modo local:** sem as variáveis `VITE_SUPABASE_*`, o app funciona com dados no `localStorage` (útil para desenvolver offline). Com elas — caso de `.env.production` — usa o Supabase. As páginas são as mesmas nos dois modos.
 
 ---
 
@@ -67,13 +68,15 @@ O SMARTHAIL monitora as condições meteorológicas em tempo real na localizaç�
 | Estilização | Tailwind CSS 3 |
 | Rotas | React Router DOM 6 |
 | Animação | Framer Motion |
-| Mapas | React Leaflet + OpenStreetMap |
+| Mapas | React Leaflet + MapLibre GL (OpenFreeMap) + radar RainViewer |
+| Backend | Supabase (Postgres + RLS, Auth, Edge Functions em Deno, pg_cron) |
+| Notificações | Web Push (VAPID) via service worker |
 | Gráficos | Recharts |
 | Datas | Moment.js (pt-BR) |
 | Ícones | Lucide React |
 | Diálogos | Radix UI Dialog |
 | Toasts | Sonner |
-| Clima | Open-Meteo API · geocodificação reversa: BigDataCloud |
+| Clima | Open-Meteo API · avisos oficiais: INMET · geocodificação reversa: BigDataCloud |
 
 ---
 
@@ -93,7 +96,7 @@ npm run build
 npm run preview    # serve a pasta dist/
 ```
 
-**Primeiro acesso:** crie uma conta em "Criar conta". Como não há servidor de e-mail, o código de verificação (e o link de redefinição de senha) aparece na própria tela, em um aviso "Modo local".
+`npm run dev` roda em **modo local** (sem `.env.local`): o código de verificação e o link de redefinição de senha aparecem na própria tela. Para usar o Supabase no desenvolvimento, copie `.env.production` para `.env.local`.
 
 **Localização:** permita o acesso à localização no navegador. Sem permissão, o app usa São Paulo como referência.
 
@@ -110,9 +113,11 @@ src/
 ├── index.css                   # Tailwind + tema escuro do Leaflet
 ├── api/
 │   ├── client.js               # `api` — ponto único de acesso (substitui base44Client)
-│   ├── store.js                # Entidades no localStorage: list/filter/get/create/update/delete
-│   ├── auth.js                 # Cadastro com código, login, reset de senha (SHA-256 + salt)
-│   ├── weather.js              # Open-Meteo → leituras, previsões de risco e alertas
+│   ├── supabase.js             # Cliente Supabase (ou null → modo local)
+│   ├── store.js                # Entidades: Supabase ou localStorage, mesma interface
+│   ├── auth.js                 # Supabase Auth ou autenticação local
+│   ├── weather.js              # Localização do aparelho + reexporta o núcleo climático
+│   ├── push.js                 # Inscrição Web Push e posição usada pelos alertas
 │   └── sync.js                 # Orquestra a sincronização + dados de demonstração
 ├── lib/
 │   ├── AuthContext.jsx         # Sessão do usuário
@@ -141,6 +146,22 @@ src/
 └── pages/                      # Login, Register, ForgotPassword, ResetPassword, Home,
                                 # FeatureDetail, Dashboard, ClimateHistory, AlertsList,
                                 # ForecastDetail, RiskMaps, Insurance, CoverAutomation, NotFound
+
+public/
+├── sw.js                       # Service worker: exibe notificações push
+├── manifest.webmanifest        # PWA (instalável; necessário para push no iPhone)
+└── icons/
+
+supabase/
+├── config.toml                 # Auth, URLs permitidas, funções
+├── migrations/                 # Esquema do banco + RLS
+├── templates/                  # E-mails em pt-BR (código de cadastro, redefinição)
+├── setup/cron.sql              # Agenda check-alerts a cada 30 min
+└── functions/
+    ├── _shared/climate.js      # Núcleo climático (usado também pelo app)
+    ├── _shared/inmet.js        # Avisos do INMET + ponto-em-polígono
+    ├── check-alerts/           # pg_cron → calcula riscos e envia Web Push
+    └── inmet-alerts/           # App → avisos do INMET para a posição do usuário
 ```
 
 ### Padrões
@@ -159,13 +180,43 @@ A cada login e a cada 15 minutos (ou no botão ↻), `sync.js`:
 2. Busca na Open-Meteo: 3 dias passados + 4 dias de previsão, de hora em hora.
 3. Gera **WeatherData** das últimas 60h (código WMO → condição: ensolarado, chuva, tempestade, granizo…).
 4. Calcula **RiskForecast** para as próximas 72h:
-   - **Granizo**: códigos WMO 96/99 (tempestade com granizo), ou tempestade com rajadas ≥ 70 km/h.
+   - **Granizo**: indicador estimado por instabilidade atmosférica — CAPE, *lifted index*, isoterma de 0 °C, trovoada e rajadas (os códigos WMO 96/99 da Open-Meteo só existem para a Europa Central).
    - **Chuva**: probabilidade ≥ 50% ou ≥ 1 mm/h; o risco depende da intensidade (fraca → baixo; forte/severa → alto/extremo).
    - **Geada**: temperatura ≤ 3 °C (≤ 0 °C alto, ≤ −2 °C extremo).
-5. Gera **ClimateAlert** a partir das previsões de risco moderado ou maior, rajadas ≥ 60 km/h, tempestades observadas nas últimas 60h e acumulado ≥ 50 mm em 24h. Alertas são atualizados por chave e expiram em 30 dias.
-6. Registra um ponto de **GpsTracking** se passaram 30 min ou o veículo andou mais de 200 m.
+5. Busca os **avisos oficiais do INMET** (via Edge Function `inmet-alerts`, pois o INMET não libera CORS) e mantém só os cujo polígono contém a posição. Severidade: Perigo Potencial → médio, Perigo → alto, Grande Perigo → crítico.
+6. Gera **ClimateAlert** a partir dos avisos do INMET, das previsões de risco moderado ou maior, rajadas ≥ 60 km/h, tempestades observadas nas últimas 60h e acumulado ≥ 50 mm em 24h. Alertas são atualizados por chave e expiram em 30 dias.
+7. Registra um ponto de **GpsTracking** se passaram 30 min ou o veículo andou mais de 200 m, e atualiza a posição usada pelas notificações.
 
 > No primeiro acesso é criado um trajeto de demonstração ao redor da posição atual, já que ainda não há rastreador no veículo. O risco de cada ponto usa o clima real daquele horário.
+
+### Notificações com o app fechado
+
+A cada 30 minutos o **pg_cron** chama a Edge Function `check-alerts`, que, para cada usuário com notificações ativas, consulta Open-Meteo + INMET na última posição conhecida, grava os alertas e envia **Web Push** para os de severidade alta ou crítica ainda não notificados. No iPhone, o push só funciona com o app adicionado à tela de início.
+
+---
+
+## 🔐 Backend (Supabase)
+
+Projeto `smarthail` na região **São Paulo (sa-east-1)**.
+
+| Item | Onde |
+| --- | --- |
+| Esquema e RLS | `supabase/migrations/` — cada usuário só acessa as próprias linhas |
+| Configuração de Auth | `supabase/config.toml` (senha ≥ 8 com letras e números, URLs de retorno) |
+| Funções | `supabase functions deploy check-alerts` / `inmet-alerts` |
+| Segredos | `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` (`supabase secrets set`) |
+| Agendamento | `supabase/setup/cron.sql` (executar uma vez com a URL da função) |
+| Variáveis do app | `.env.production` — só valores públicos (URL, chave *publishable*, chave pública VAPID) |
+
+Comandos úteis (com a CLI logada via `npx supabase login`):
+
+```bash
+npx supabase db push --remote          # aplica novas migrations
+npx supabase functions deploy check-alerts inmet-alerts --use-api
+npx supabase config push --remote      # aplica mudanças do config.toml
+```
+
+**E-mails:** o envio padrão do Supabase só entrega para membros da organização. Para enviar código de cadastro e redefinição de senha a qualquer pessoa, configure um SMTP próprio (ex.: Gmail com senha de app) em *Authentication → Emails → SMTP Settings*, depois ative `enable_confirmations` e os modelos de e-mail no `config.toml` e rode `config push`.
 
 ---
 
@@ -263,9 +314,9 @@ O build usa `VITE_BASE=/<repositorio>/` e copia `index.html` para `404.html`, pa
 
 ## 📍 Roadmap
 
-- [ ] Backend real (Supabase): contas e dados sincronizados entre dispositivos
+- [x] Backend real (Supabase): contas e dados sincronizados entre dispositivos
 - [ ] Login com Google
-- [ ] Notificações push para alertas críticos
+- [x] Notificações push para alertas críticos
 - [ ] Acionamento automático da capa a partir de regras de risco
 - [ ] Integração com o hardware da capa (hoje os comandos são simulados)
 - [ ] Rastreador GPS do veículo (hoje usa a localização do celular)
@@ -278,5 +329,7 @@ O build usa `VITE_BASE=/<repositorio>/` e copia `index.html` para `404.html`, pa
 ## 📄 Créditos
 
 - Dados meteorológicos: [Open-Meteo](https://open-meteo.com) (CC BY 4.0)
-- Mapas: © colaboradores do [OpenStreetMap](https://www.openstreetmap.org/copyright)
+- Avisos meteorológicos oficiais: [INMET](https://portal.inmet.gov.br)
+- Mapas: [OpenFreeMap](https://openfreemap.org), © OpenMapTiles, © colaboradores do [OpenStreetMap](https://www.openstreetmap.org/copyright)
+- Radar: [RainViewer](https://www.rainviewer.com)
 - Geocodificação reversa: [BigDataCloud](https://www.bigdatacloud.com)

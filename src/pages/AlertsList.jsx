@@ -54,6 +54,11 @@ export default function AlertsList() {
                 <div className="mb-2 flex items-center gap-2">
                   <span className="text-xs text-slate-200">{alertTypeLabels[alert.type]}</span>
                   <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${sev.badge}`}>{sev.label}</span>
+                  {alert.source === 'inmet' && (
+                    <span className="rounded-full border border-sky-400/30 bg-sky-500/15 px-2 py-0.5 text-[10px] font-bold uppercase text-sky-300">
+                      INMET · oficial
+                    </span>
+                  )}
                   {alert.is_active && (
                     <span className="ml-auto flex items-center gap-1.5 text-[10px] font-semibold uppercase text-slate-300">
                       <span className="relative flex h-2 w-2">
@@ -67,7 +72,11 @@ export default function AlertsList() {
                 <p className="font-semibold text-white">{alert.title}</p>
                 <p className="mt-1 text-sm text-slate-300">{alert.description}</p>
                 <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-400">
-                  <span className="flex items-center gap-1"><Clock className="h-3 w-3" />{moment(alert.timestamp).format('DD/MM/YYYY HH:mm')}</span>
+                  <span className="flex items-center gap-1">
+                    <Clock className="h-3 w-3" />
+                    {moment(alert.timestamp).format('DD/MM/YYYY HH:mm')}
+                    {alert.expected_end && ` até ${moment(alert.expected_end).format('DD/MM HH:mm')}`}
+                  </span>
                   {alert.location_name && <span className="flex items-center gap-1"><MapPin className="h-3 w-3" />{alert.location_name}</span>}
                 </div>
               </div>

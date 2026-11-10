@@ -15,6 +15,7 @@ import {
   readingAt,
 } from './weather';
 import { updatePushLocation } from './push';
+import { supabase, isCloud } from './supabase';
 
 const MIN_INTERVAL_MS = 15 * 60 * 1000;
 const HOUR = 3600;
@@ -61,8 +62,9 @@ async function runSync() {
   await entities.RiskForecast.deleteWhere({ eq: { demo: false } });
   await entities.RiskForecast.bulkCreate(forecasts);
 
-  // Alertas: atualização por chave, preservando histórico (30 dias)
-  await upsertAlerts(buildAlerts(data, forecasts, location));
+  // Alertas: avisos oficiais do INMET + alertas calculados, atualizados por chave (histórico de 30 dias)
+  const official = await fetchOfficialAlerts(location);
+  await upsertAlerts([...official, ...buildAlerts(data, forecasts, location)]);
 
   // Trajeto GPS, capa e posição usada pelo servidor de notificações
   await updateTracking(data, location, forecasts);
@@ -72,6 +74,19 @@ async function runSync() {
   const meta = { at: new Date().toISOString(), location, usedDeviceLocation: Boolean(device) };
   if (activeUserId) writeJSON(metaKey(), meta);
   return meta;
+}
+
+/** Avisos do INMET para a posição (via Edge Function; o INMET não libera CORS). */
+async function fetchOfficialAlerts(location) {
+  if (!isCloud) return [];
+  try {
+    const { data, error } = await supabase.functions.invoke('inmet-alerts', { body: location });
+    if (error) throw error;
+    return data?.alerts ?? [];
+  } catch (e) {
+    console.warn('Avisos do INMET indisponíveis', e);
+    return [];
+  }
 }
 
 async function upsertAlerts(fresh) {
